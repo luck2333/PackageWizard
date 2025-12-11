@@ -1,0 +1,71 @@
+[
+  {
+    "page": 4,
+    "type": "img",
+    "rect": [
+      102,
+      423,
+      489,
+      756
+    ],
+    "new_rect": [
+      102,
+      423,
+      489,
+      756
+    ],
+    "package_type": "BGA",
+    "source": "manual",
+    "part_content": [
+      {
+        "part_name": "BGA",
+        "page": 4,
+        "rect": [
+          109,
+          588,
+          388,
+          746
+        ],
+        "new_rect": [
+          109,
+          588,
+          388,
+          746
+        ]
+      },
+      {
+        "part_name": "Top",
+        "page": 4,
+        "rect": [
+          122,
+          443,
+          358,
+          573
+        ],
+        "new_rect": [
+          122,
+          443,
+          358,
+          573
+        ]
+      },
+      {
+        "part_name": "Side",
+        "page": 4,
+        "rect": [
+          397,
+          426,
+          478,
+          570
+        ],
+        "new_rect": [
+          397,
+          426,
+          478,
+          570
+        ]
+      }
+    ],
+    "reco_content": null
+  }
+]

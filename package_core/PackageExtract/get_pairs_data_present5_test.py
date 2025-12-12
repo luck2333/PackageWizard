@@ -9,6 +9,7 @@ import operator
 import re
 from random import randint
 import copy
+from pathlib import Path
 from package_core.PackageExtract.yolox_onnx_py.onnx_QFP_pairs_data_location2 import begain_output_pairs_data_location
 # from yolox_onnx_py.onnx_output_other_location import begain_output_other_location
 from package_core.PackageExtract.yolox_onnx_py.onnx_output_serial_number_letter_location import begain_output_serial_number_letter_location
@@ -73,7 +74,73 @@ def delete_other(other, data):
     return new_data
 
 
-def find_pairs_length(img_path, pairs, test_mode):
+def _draw_line_segments(img, lines, color, thickness=2):
+    """
+    在 ``img`` 上绘制多条线段，忽略空数组。
+    """
+
+    if lines is None:
+        return
+
+    for line in lines:
+        cv2.line(
+            img,
+            (int(line[0]), int(line[1])),
+            (int(line[2]), int(line[3])),
+            color,
+            thickness,
+        )
+
+
+def _draw_pair(img, pair, color=(0, 255, 0)):
+    """在 ``img`` 上绘制尺寸线框（由箭头检测得到的矩形/线段）。"""
+
+    cv2.rectangle(
+        img,
+        (int(pair[0]), int(pair[1])),
+        (int(pair[2]), int(pair[3])),
+        color,
+        2,
+    )
+
+
+def _save_visual_stage(
+    base_img,
+    save_dir,
+    view_name,
+    pair_idx,
+    stage_name,
+    pair=None,
+    left_candidates=None,
+    right_candidates=None,
+    chosen_left=None,
+    chosen_right=None,
+):
+    """
+    将当前阶段的匹配线段绘制并保存到 ``save_dir``。
+
+    - ``pair``：正在处理的尺寸线框。
+    - ``left_candidates``/``right_candidates``：候选引线。
+    - ``chosen_left``/``chosen_right``：最终确认或补全后的引线。
+    """
+
+    if base_img is None:
+        return
+
+    canvas = base_img.copy()
+    if pair is not None:
+        _draw_pair(canvas, pair, (0, 200, 0))
+    _draw_line_segments(canvas, left_candidates, (255, 140, 0))
+    _draw_line_segments(canvas, right_candidates, (0, 165, 255))
+    _draw_line_segments(canvas, chosen_left, (0, 0, 255), thickness=3)
+    _draw_line_segments(canvas, chosen_right, (0, 0, 255), thickness=3)
+
+    os.makedirs(save_dir, exist_ok=True)
+    filename = f"{view_name}_pair{pair_idx}_{stage_name}.jpg"
+    cv2.imwrite(os.path.join(save_dir, filename), canvas)
+
+
+def find_pairs_length(img_path, pairs, test_mode, visualize=False, visualize_dir=None):
     '''
     功能：检测标尺线附近成对的引线
     pairs np.二维数组[x1,y1,x2,y2,0 = outside 1 = inside]
@@ -93,6 +160,10 @@ def find_pairs_length(img_path, pairs, test_mode):
         shu = w / 2
 
     ver_lines_heng, ver_lines_shu = find_all_lines(img_path, test_mode)
+
+    debug_img = cv2.imread(img_path) if visualize else None
+    view_name = Path(img_path).stem if visualize else ""
+    save_dir = visualize_dir or os.path.join(OPENCV_OUTPUT_LINE, "ruler_matching")
 
     pairs_length = np.zeros((0, 13))  # 存储pairs以及所表示的距离
     pairs_length_middle = np.zeros(13)
@@ -124,6 +195,13 @@ def find_pairs_length(img_path, pairs, test_mode):
                abs(ver_lines_shu[i][3] - ver_lines_shu[i][1])) > min_length:
             new_ver_lines = np.r_[new_ver_lines, [ver_lines_shu[i]]]
     ver_lines_shu = new_ver_lines
+
+    if visualize and debug_img is not None:
+        lines_stage = debug_img.copy()
+        _draw_line_segments(lines_stage, ver_lines_heng, (0, 0, 255))
+        _draw_line_segments(lines_stage, ver_lines_shu, (255, 0, 0))
+        os.makedirs(save_dir, exist_ok=True)
+        cv2.imwrite(os.path.join(save_dir, f"{view_name}_step0_lines.jpg"), lines_stage)
     # print("len(ver_lines_heng)", len(ver_lines_heng))
     ratio = 0.4
     ra = 2
@@ -133,6 +211,8 @@ def find_pairs_length(img_path, pairs, test_mode):
         print(f'开始{pairs[i]}判断')
         print(f'横{heng}')
         print(f'竖{shu}')
+        if visualize:
+            _save_visual_stage(debug_img, save_dir, view_name, i, "pair_start", pair=pairs[i])
         if pairs[i][4] == 0:  # 外向标尺线
             print("外向")
             ratio = 0.15
@@ -180,6 +260,17 @@ def find_pairs_length(img_path, pairs, test_mode):
                     pairs_length_middle[8:12] = right_straight[0, 0:4]
                     pairs_length_middle[12] = abs(left_straight[0, 0] - right_straight[0, 0])
                     pairs_length = np.r_[pairs_length, [pairs_length_middle]]
+                    if visualize:
+                        _save_visual_stage(
+                            debug_img,
+                            save_dir,
+                            view_name,
+                            i,
+                            "matched",
+                            pair=pairs[i],
+                            chosen_left=np.array([pairs_length_middle[4:8]]),
+                            chosen_right=np.array([pairs_length_middle[8:12]]),
+                        )
                     print("找到两条引线，直接使用")
                 elif len(left_straight) > 0 or len(right_straight) > 0:
                     # 只找到一条引线，生成另一条
@@ -250,6 +341,17 @@ def find_pairs_length(img_path, pairs, test_mode):
                     # 计算距离
                     pairs_length_middle[12] = abs(pairs_length_middle[4] - pairs_length_middle[8])
                     pairs_length = np.r_[pairs_length, [pairs_length_middle]]
+                    if visualize:
+                        _save_visual_stage(
+                            debug_img,
+                            save_dir,
+                            view_name,
+                            i,
+                            "matched",
+                            pair=pairs[i],
+                            chosen_left=np.array([pairs_length_middle[4:8]]),
+                            chosen_right=np.array([pairs_length_middle[8:12]]),
+                        )
                 else:
                     # 没有找到任何引线，不保存这个pairs
                     print("没有找到任何引线，跳过这个pairs")
@@ -302,6 +404,17 @@ def find_pairs_length(img_path, pairs, test_mode):
                     pairs_length_middle[8:12] = down_straight[0, 0:4]
                     pairs_length_middle[12] = abs(up_straight[0, 1] - down_straight[0, 1])
                     pairs_length = np.r_[pairs_length, [pairs_length_middle]]
+                    if visualize:
+                        _save_visual_stage(
+                            debug_img,
+                            save_dir,
+                            view_name,
+                            i,
+                            "matched",
+                            pair=pairs[i],
+                            chosen_left=np.array([pairs_length_middle[4:8]]),
+                            chosen_right=np.array([pairs_length_middle[8:12]]),
+                        )
                     print("找到两条引线，直接使用")
                 elif len(up_straight) > 0 or len(down_straight) > 0:
                     # 只找到一条引线，生成另一条
@@ -372,6 +485,17 @@ def find_pairs_length(img_path, pairs, test_mode):
                     # 计算距离
                     pairs_length_middle[12] = abs(pairs_length_middle[5] - pairs_length_middle[9])
                     pairs_length = np.r_[pairs_length, [pairs_length_middle]]
+                    if visualize:
+                        _save_visual_stage(
+                            debug_img,
+                            save_dir,
+                            view_name,
+                            i,
+                            "matched",
+                            pair=pairs[i],
+                            chosen_left=np.array([pairs_length_middle[4:8]]),
+                            chosen_right=np.array([pairs_length_middle[8:12]]),
+                        )
                 else:
                     # 没有找到任何引线，不保存这个pairs
                     print("没有找到任何引线，跳过这个pairs")
@@ -426,6 +550,17 @@ def find_pairs_length(img_path, pairs, test_mode):
                     pairs_length_middle[8:12] = right_straight[0, 0:4]
                     pairs_length_middle[12] = abs(left_straight[0, 0] - right_straight[0, 0])
                     pairs_length = np.r_[pairs_length, [pairs_length_middle]]
+                    if visualize:
+                        _save_visual_stage(
+                            debug_img,
+                            save_dir,
+                            view_name,
+                            i,
+                            "matched",
+                            pair=pairs[i],
+                            chosen_left=np.array([pairs_length_middle[4:8]]),
+                            chosen_right=np.array([pairs_length_middle[8:12]]),
+                        )
                     print("找到两条引线，直接使用")
                 elif len(left_straight) > 0 or len(right_straight) > 0:
                     # 只找到一条引线，生成另一条
@@ -472,6 +607,17 @@ def find_pairs_length(img_path, pairs, test_mode):
                     # 计算距离
                     pairs_length_middle[12] = abs(pairs_length_middle[4] - pairs_length_middle[8])
                     pairs_length = np.r_[pairs_length, [pairs_length_middle]]
+                    if visualize:
+                        _save_visual_stage(
+                            debug_img,
+                            save_dir,
+                            view_name,
+                            i,
+                            "matched",
+                            pair=pairs[i],
+                            chosen_left=np.array([pairs_length_middle[4:8]]),
+                            chosen_right=np.array([pairs_length_middle[8:12]]),
+                        )
                 else:
                     # 没有找到任何引线，不保存这个pairs
                     print("没有找到任何引线，跳过这个pairs（内向）")
@@ -524,6 +670,17 @@ def find_pairs_length(img_path, pairs, test_mode):
                     pairs_length_middle[8:12] = down_straight[0, 0:4]
                     pairs_length_middle[12] = abs(up_straight[0, 1] - down_straight[0, 1])
                     pairs_length = np.r_[pairs_length, [pairs_length_middle]]
+                    if visualize:
+                        _save_visual_stage(
+                            debug_img,
+                            save_dir,
+                            view_name,
+                            i,
+                            "matched",
+                            pair=pairs[i],
+                            chosen_left=np.array([pairs_length_middle[4:8]]),
+                            chosen_right=np.array([pairs_length_middle[8:12]]),
+                        )
                     print("找到两条引线，直接使用")
                 elif len(up_straight) > 0 or len(down_straight) > 0:
                     # 只找到一条引线，生成另一条
@@ -570,6 +727,17 @@ def find_pairs_length(img_path, pairs, test_mode):
                     # 计算距离
                     pairs_length_middle[12] = abs(pairs_length_middle[5] - pairs_length_middle[9])
                     pairs_length = np.r_[pairs_length, [pairs_length_middle]]
+                    if visualize:
+                        _save_visual_stage(
+                            debug_img,
+                            save_dir,
+                            view_name,
+                            i,
+                            "matched",
+                            pair=pairs[i],
+                            chosen_left=np.array([pairs_length_middle[4:8]]),
+                            chosen_right=np.array([pairs_length_middle[8:12]]),
+                        )
                 else:
                     # 没有找到任何引线，不保存这个pairs
                     print("没有找到任何引线，跳过这个pairs（内向）")
@@ -635,6 +803,12 @@ def find_pairs_length(img_path, pairs, test_mode):
     pairs_length = remove_duplicate_pairs(pairs_length)
 
     return pairs_length  # np.二维数组（，13）[pairs_x1_y1_x2_y2,引线1_x1_y1_x2_y2,引线2_x1_y1_x2_y2,两引线距离]
+
+
+def visualize_pairs_matching(img_path, pairs, test_mode=0, output_dir=None):
+    """运行 ``find_pairs_length`` 并输出完整的匹配可视化结果。"""
+
+    return find_pairs_length(img_path, pairs, test_mode, visualize=True, visualize_dir=output_dir)
 
 
 def remove_duplicate_pairs(pairs_length):
